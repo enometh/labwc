@@ -499,6 +499,8 @@ xwayland_view_get_string_prop(struct view *view, const char *prop)
 	 * here since we use the app_id for icon lookups.
 	 */
 	if (!strcmp(prop, "app_id")) {
+	  /* ;madhu 241022 revert commit 977d561 which breaks wine */
+		return xwayland_surface->class;
 		return xwayland_surface->instance;
 	}
 	return "";
