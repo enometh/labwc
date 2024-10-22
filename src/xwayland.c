@@ -596,7 +596,24 @@ handle_set_class(struct wl_listener *listener, void *data)
 	 * but this caused missing icons with Firefox, which has an
 	 * instance of 'Navigator' for historical reasons.
 	 */
-	view_set_app_id(view, xwayland_view->xwayland_surface->class);
+	//view_set_app_id(view, xwayland_view->xwayland_surface->class);
+
+		/* ;madhu 241022 revert commit 977d561 which breaks wine */
+		static int match_instance = -1;
+		if (match_instance == -1) {
+			char *p = getenv("LABWCMATCHINSTANCE");
+			if (!p || *p == '\0' || *p == 'n' || *p == 'N')
+				match_instance = 0;
+			else
+				match_instance = 1;
+		}
+
+	view_set_app_id(view, match_instance ?
+			(xwayland_view->xwayland_surface->instance ?
+			 xwayland_view->xwayland_surface->instance : "")
+			: (xwayland_view->xwayland_surface->class ?
+			   xwayland_view->xwayland_surface->class : ""));
+
 }
 
 static void
