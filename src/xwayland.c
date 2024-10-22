@@ -598,7 +598,21 @@ handle_set_class(struct wl_listener *listener, void *data)
 	 * 'instance' except for being capitalized. We want lowercase
 	 * here since we use the app_id for icon lookups.
 	 */
-	view_set_app_id(view, xwayland_view->xwayland_surface->instance);
+		/* ;madhu 241022 revert commit 977d561 which breaks wine */
+		static int match_instance = -1;
+		if (match_instance == -1) {
+			char *p = getenv("LABWCMATCHINSTANCE");
+			if (!p || *p == '\0' || *p == 'n' || *p == 'N')
+				match_instance = 0;
+			else
+				match_instance = 1;
+		}
+
+	view_set_app_id(view, match_instance ?
+			(xwayland_view->xwayland_surface->instance ?
+			 xwayland_view->xwayland_surface->instance : "")
+			: (xwayland_view->xwayland_surface->class ?
+			   xwayland_view->xwayland_surface->class : ""));
 }
 
 static void
