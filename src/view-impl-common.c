@@ -6,10 +6,14 @@
 #include "view.h"
 #include "window-rules.h"
 
+#include <assert.h>
 void
 view_impl_map(struct view *view)
 {
+	// ;madhu 250601 - make emacs frames uniconify.
+	if (view->minimized) view_minimize(view, false);
 	view_update_visibility(view);
+	assert(!view->minimized);
 
 	/* Leave minimized, if minimized before map */
 	if (!view->minimized) {
