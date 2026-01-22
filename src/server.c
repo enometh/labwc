@@ -104,6 +104,8 @@ reload_config_and_theme(void)
 	theme_finish(rc.theme);
 	theme_init(rc.theme, rc.theme_name);
 
+	server.renderer->effects.grayscale = rc.grayscale;
+
 #if HAVE_LIBSFDO
 	desktop_entry_finish();
 	desktop_entry_init();
@@ -841,7 +843,12 @@ server_init(void)
 #if HAVE_XWAYLAND
 	xwayland_server_init(server.compositor);
 #endif
+
 	wl_event_loop_add_idle(server.wl_event_loop, nag_show_callback, NULL);
+
+	rcxml_finish();
+	rcxml_read(rc.config_file);
+	server.renderer->effects.grayscale = rc.grayscale;
 }
 
 void
