@@ -212,6 +212,9 @@ struct rcxml {
 	float mag_scale;
 	float mag_increment;
 	bool mag_filter;
+
+	/* Desaturater */
+	float grayscale;
 };
 
 /* defined in main.c */

@@ -1424,6 +1424,8 @@ entry(xmlNode *node, char *nodename, char *content)
 			wlr_log(WLR_ERROR, "invalid value for "
 				"<privilegedInterfaces><allow>");
 		}
+	} else if (!strcasecmp(nodename, "grayscale.renderer")) {
+		set_float(content, &rc.grayscale);
 	}
 
 	return false;
@@ -1576,6 +1578,8 @@ rcxml_init(void)
 	rc.mag_scale = 2.0;
 	rc.mag_increment = 0.2;
 	rc.mag_filter = true;
+
+	rc.grayscale = 0;
 }
 
 static void
