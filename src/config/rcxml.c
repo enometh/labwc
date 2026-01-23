@@ -1504,8 +1504,9 @@ entry(xmlNode *node, char *nodename, char *content)
 		}
 	} else if (!strcasecmp(nodename, "grayscale.renderer")) {
 		set_float(content, &rc.grayscale);
+	} else if (!strcasecmp(nodename, "hue_adjust.renderer")) {
+		set_float(content, &rc.hue_adjust);
 	}
-
 	return false;
 }
 
@@ -1661,6 +1662,7 @@ rcxml_init(void)
 	rc.mag_filter = true;
 
 	rc.grayscale = 0;
+	rc.hue_adjust = 0;
 }
 
 static void
