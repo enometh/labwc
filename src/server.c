@@ -96,6 +96,7 @@ reload_config_and_theme(void)
 	theme_init(rc.theme, rc.theme_name);
 
 	server->renderer->effects.grayscale = rc.grayscale;
+	server->renderer->effects.hue_adjust = rc.hue_adjust;
 
 #if HAVE_LIBSFDO
 	desktop_entry_finish();
@@ -762,6 +763,7 @@ server_init(void)
 	rcxml_finish();
 	rcxml_read(rc.config_file);
 	server->renderer->effects.grayscale = rc.grayscale;
+	server->renderer->effects.hue_adjust = rc.hue_adjust;
 }
 
 void
