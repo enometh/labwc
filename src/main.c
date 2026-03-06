@@ -5,6 +5,9 @@
 #include <signal.h>
 #include <unistd.h>
 #include <wlr/version.h>
+#include <sys/resource.h>
+#include <assert.h>
+
 #include "common/fd-util.h"
 #include "common/font.h"
 #include "common/macros.h"
@@ -27,6 +30,11 @@
  */
 struct rcxml rc = { 0 };
 struct server server = { 0 };
+
+// to reset core limit for spawned processes
+static struct rlimit orig_core_limit = { 0, 0 };
+void init_orig_core_limit() { assert(getrlimit( RLIMIT_CORE, &orig_core_limit) == 0 ); }
+void restore_orig_core_limit() { assert(setrlimit(RLIMIT_CORE, &orig_core_limit) == 0 ); }
 
 static const struct option long_options[] = {
 	{"config", required_argument, NULL, 'c'},
@@ -241,6 +249,10 @@ main(int argc, char *argv[])
 	bindtextdomain(GETTEXT_PACKAGE, LOCALEDIR);
 	textdomain(GETTEXT_PACKAGE);
 #endif
+
+	init_orig_core_limit();
+	struct rlimit core_limit = { RLIM_INFINITY, RLIM_INFINITY };
+	assert( setrlimit( RLIMIT_CORE, &core_limit ) == 0 );
 
 	rcxml_read(rc.config_file);
 

@@ -11,6 +11,8 @@
 #include <wlr/util/log.h>
 #include "common/fd-util.h"
 
+void restore_orig_core_limit(void);
+
 static void
 reset_signals_and_limits(void)
 {
@@ -80,6 +82,8 @@ spawn_async_no_shell(char const *command)
 	 * grandchild becomes orphaned & the responsibility of the OS.
 	 */
 	pid_t child = 0, grandchild = 0;
+
+	restore_orig_core_limit();
 
 	child = fork();
 	switch (child) {
@@ -152,6 +156,8 @@ spawn_primary_client(const char *command)
 		g_error_free(err);
 		return -1;
 	}
+
+	restore_orig_core_limit();
 
 	pid_t child = fork();
 	switch (child) {
