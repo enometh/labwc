@@ -1,0 +1,1033 @@
+From 6c528a3abbaaf43aed4116c0d5bd2cf67b8d00cf Mon Sep 17 00:00:00 2001
+From: Tris Emmy Wilson <tris@tris.fyi>
+Date: Thu, 13 Mar 2025 09:05:45 -0400
+Subject: [PATCH 1/5] grayscale patches
+
+---
+ include/render/gles2.h                 |  2 ++
+ render/gles2/pass.c                    |  4 ++++
+ render/gles2/renderer.c                |  4 ++++
+ render/gles2/shaders/quad.frag         | 10 +++++++++-
+ render/gles2/shaders/tex_external.frag | 10 +++++++++-
+ render/gles2/shaders/tex_rgba.frag     | 10 +++++++++-
+ render/gles2/shaders/tex_rgbx.frag     | 10 +++++++++-
+ 7 files changed, 46 insertions(+), 4 deletions(-)
+
+diff --git a/include/render/gles2.h b/include/render/gles2.h
+index 6b852dcb..b513a4da 100644
+--- a/include/render/gles2.h
++++ b/include/render/gles2.h
+@@ -35,6 +35,7 @@ struct wlr_gles2_tex_shader {
+ 	GLint tex;
+ 	GLint alpha;
+ 	GLint pos_attrib;
++	GLint is_grayscale;
+ };
+ 
+ struct wlr_gles2_renderer {
+@@ -79,6 +80,7 @@ struct wlr_gles2_renderer {
+ 			GLint proj;
+ 			GLint color;
+ 			GLint pos_attrib;
++			GLint is_grayscale;
+ 		} quad;
+ 		struct wlr_gles2_tex_shader tex_rgba;
+ 		struct wlr_gles2_tex_shader tex_rgbx;
+diff --git a/render/gles2/pass.c b/render/gles2/pass.c
+index a70ea132..02938b0e 100644
+--- a/render/gles2/pass.c
++++ b/render/gles2/pass.c
+@@ -242,6 +242,7 @@ static void render_pass_add_texture(struct wlr_render_pass *wlr_pass,
+ 		break;
+ 	}
+ 
++	glUniform1i(shader->is_grayscale, 1);
+ 	glUniform1i(shader->tex, 0);
+ 	glUniform1f(shader->alpha, alpha);
+ 	set_proj_matrix(shader->proj, pass->projection_matrix, &dst_box);
+@@ -278,6 +279,9 @@ static void render_pass_add_rect(struct wlr_render_pass *wlr_pass,
+ 		glUseProgram(renderer->shaders.quad.program);
+ 		set_proj_matrix(renderer->shaders.quad.proj, pass->projection_matrix, &box);
+ 		glUniform4f(renderer->shaders.quad.color, color->r, color->g, color->b, color->a);
++		/* TODO tris do grayscale computation on cpu */
++		glUniform1i(renderer->shaders.quad.is_grayscale, 1);
++
+ 		render(&box, options->clip, renderer->shaders.quad.pos_attrib);
+ 	}
+ 
+diff --git a/render/gles2/renderer.c b/render/gles2/renderer.c
+index e362daee..a41701ef 100644
+--- a/render/gles2/renderer.c
++++ b/render/gles2/renderer.c
+@@ -640,6 +640,7 @@ struct wlr_renderer *wlr_gles2_renderer_create(struct wlr_egl *egl) {
+ 	}
+ 	renderer->shaders.quad.proj = glGetUniformLocation(prog, "proj");
+ 	renderer->shaders.quad.color = glGetUniformLocation(prog, "color");
++	renderer->shaders.quad.is_grayscale = glGetUniformLocation(prog, "is_grayscale");
+ 	renderer->shaders.quad.pos_attrib = glGetAttribLocation(prog, "pos");
+ 
+ 	renderer->shaders.tex_rgba.program = prog =
+@@ -651,6 +652,7 @@ struct wlr_renderer *wlr_gles2_renderer_create(struct wlr_egl *egl) {
+ 	renderer->shaders.tex_rgba.tex_proj = glGetUniformLocation(prog, "tex_proj");
+ 	renderer->shaders.tex_rgba.tex = glGetUniformLocation(prog, "tex");
+ 	renderer->shaders.tex_rgba.alpha = glGetUniformLocation(prog, "alpha");
++	renderer->shaders.tex_rgba.is_grayscale = glGetUniformLocation(prog, "is_grayscale");
+ 	renderer->shaders.tex_rgba.pos_attrib = glGetAttribLocation(prog, "pos");
+ 
+ 	renderer->shaders.tex_rgbx.program = prog =
+@@ -662,6 +664,7 @@ struct wlr_renderer *wlr_gles2_renderer_create(struct wlr_egl *egl) {
+ 	renderer->shaders.tex_rgbx.tex_proj = glGetUniformLocation(prog, "tex_proj");
+ 	renderer->shaders.tex_rgbx.tex = glGetUniformLocation(prog, "tex");
+ 	renderer->shaders.tex_rgbx.alpha = glGetUniformLocation(prog, "alpha");
++	renderer->shaders.tex_rgbx.is_grayscale = glGetUniformLocation(prog, "is_grayscale");
+ 	renderer->shaders.tex_rgbx.pos_attrib = glGetAttribLocation(prog, "pos");
+ 
+ 	if (renderer->exts.OES_egl_image_external) {
+@@ -674,6 +677,7 @@ struct wlr_renderer *wlr_gles2_renderer_create(struct wlr_egl *egl) {
+ 		renderer->shaders.tex_ext.tex_proj = glGetUniformLocation(prog, "tex_proj");
+ 		renderer->shaders.tex_ext.tex = glGetUniformLocation(prog, "tex");
+ 		renderer->shaders.tex_ext.alpha = glGetUniformLocation(prog, "alpha");
++		renderer->shaders.tex_ext.is_grayscale = glGetUniformLocation(prog, "is_grayscale");
+ 		renderer->shaders.tex_ext.pos_attrib = glGetAttribLocation(prog, "pos");
+ 	}
+ 
+diff --git a/render/gles2/shaders/quad.frag b/render/gles2/shaders/quad.frag
+index 97d3a31c..d8d727ab 100644
+--- a/render/gles2/shaders/quad.frag
++++ b/render/gles2/shaders/quad.frag
+@@ -8,6 +8,14 @@ varying vec4 v_color;
+ varying vec2 v_texcoord;
+ uniform vec4 color;
+ 
++uniform bool is_grayscale;
++
+ void main() {
+-	gl_FragColor = color;
++	vec4 sample = color;
++
++	if(is_grayscale) {
++		sample.rgb = vec3(dot(sample.rgb, vec3(0.299, 0.587, 0.114)));
++	}
++
++	gl_FragColor = sample;
+ }
+diff --git a/render/gles2/shaders/tex_external.frag b/render/gles2/shaders/tex_external.frag
+index 73909fe0..54990422 100644
+--- a/render/gles2/shaders/tex_external.frag
++++ b/render/gles2/shaders/tex_external.frag
+@@ -10,6 +10,14 @@ varying vec2 v_texcoord;
+ uniform samplerExternalOES texture0;
+ uniform float alpha;
+ 
++uniform bool is_grayscale;
++
+ void main() {
+-	gl_FragColor = texture2D(texture0, v_texcoord) * alpha;
++	vec4 sample = texture2D(texture0, v_texcoord) * alpha;
++
++	if(is_grayscale) {
++		sample.rgb = vec3(dot(sample.rgb, vec3(0.299, 0.587, 0.114)));
++	}
++
++	gl_FragColor = sample;
+ }
+diff --git a/render/gles2/shaders/tex_rgba.frag b/render/gles2/shaders/tex_rgba.frag
+index c0a0dea6..4a700112 100644
+--- a/render/gles2/shaders/tex_rgba.frag
++++ b/render/gles2/shaders/tex_rgba.frag
+@@ -8,6 +8,14 @@ varying vec2 v_texcoord;
+ uniform sampler2D tex;
+ uniform float alpha;
+ 
++uniform bool is_grayscale;
++
+ void main() {
+-	gl_FragColor = texture2D(tex, v_texcoord) * alpha;
++	vec4 sample = texture2D(tex, v_texcoord) * alpha;
++
++	if(is_grayscale) {
++		sample.rgb = vec3(dot(sample.rgb, vec3(0.299, 0.587, 0.114)));
++	}
++
++	gl_FragColor = sample;
+ }
+diff --git a/render/gles2/shaders/tex_rgbx.frag b/render/gles2/shaders/tex_rgbx.frag
+index ae40ad53..e51ef84c 100644
+--- a/render/gles2/shaders/tex_rgbx.frag
++++ b/render/gles2/shaders/tex_rgbx.frag
+@@ -8,6 +8,14 @@ varying vec2 v_texcoord;
+ uniform sampler2D tex;
+ uniform float alpha;
+ 
++uniform bool is_grayscale;
++
+ void main() {
+-	gl_FragColor = vec4(texture2D(tex, v_texcoord).rgb, 1.0) * alpha;
++	vec4 sample = vec4(texture2D(tex, v_texcoord).rgb, 1.0) * alpha;
++
++	if(is_grayscale) {
++		sample.rgb = vec3(dot(sample.rgb, vec3(0.299, 0.587, 0.114)));
++	}
++
++	gl_FragColor = sample;
+ }
+-- 
+2.49.0.9.gd50a5e8939.dirty
+
+
+From f66ef566543676b612c19fd2c2e2bbb4f9ea1e08 Mon Sep 17 00:00:00 2001
+From: Tris Emmy Wilson <tris@tris.fyi>
+Date: Thu, 13 Mar 2025 13:42:58 -0400
+Subject: [PATCH 2/5] add config variable for grayscale
+
+---
+ include/wlr/render/wlr_renderer.h | 5 +++++
+ render/gles2/pass.c               | 4 ++--
+ render/gles2/renderer.c           | 3 +++
+ 3 files changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/include/wlr/render/wlr_renderer.h b/include/wlr/render/wlr_renderer.h
+index 902d7564..96e8ab58 100644
+--- a/include/wlr/render/wlr_renderer.h
++++ b/include/wlr/render/wlr_renderer.h
+@@ -59,6 +59,11 @@ struct wlr_renderer {
+ 		bool timeline;
+ 	} features;
+ 
++	// effects
++	struct {
++		bool grayscale;
++	} effects;
++
+ 	struct {
+ 		const struct wlr_renderer_impl *impl;
+ 	} WLR_PRIVATE;
+diff --git a/render/gles2/pass.c b/render/gles2/pass.c
+index 02938b0e..3974f760 100644
+--- a/render/gles2/pass.c
++++ b/render/gles2/pass.c
+@@ -242,7 +242,7 @@ static void render_pass_add_texture(struct wlr_render_pass *wlr_pass,
+ 		break;
+ 	}
+ 
+-	glUniform1i(shader->is_grayscale, 1);
++	glUniform1i(shader->is_grayscale, renderer->wlr_renderer.effects.grayscale);
+ 	glUniform1i(shader->tex, 0);
+ 	glUniform1f(shader->alpha, alpha);
+ 	set_proj_matrix(shader->proj, pass->projection_matrix, &dst_box);
+@@ -280,7 +280,7 @@ static void render_pass_add_rect(struct wlr_render_pass *wlr_pass,
+ 		set_proj_matrix(renderer->shaders.quad.proj, pass->projection_matrix, &box);
+ 		glUniform4f(renderer->shaders.quad.color, color->r, color->g, color->b, color->a);
+ 		/* TODO tris do grayscale computation on cpu */
+-		glUniform1i(renderer->shaders.quad.is_grayscale, 1);
++		glUniform1i(renderer->shaders.quad.is_grayscale, renderer->wlr_renderer.effects.grayscale);
+ 
+ 		render(&box, options->clip, renderer->shaders.quad.pos_attrib);
+ 	}
+diff --git a/render/gles2/renderer.c b/render/gles2/renderer.c
+index a41701ef..c8fd8856 100644
+--- a/render/gles2/renderer.c
++++ b/render/gles2/renderer.c
+@@ -528,6 +528,9 @@ struct wlr_renderer *wlr_gles2_renderer_create(struct wlr_egl *egl) {
+ 	wlr_renderer_init(&renderer->wlr_renderer, &renderer_impl, WLR_BUFFER_CAP_DMABUF);
+ 	renderer->wlr_renderer.features.output_color_transform = false;
+ 
++	/* effects */
++	renderer->wlr_renderer.effects.grayscale = false;
++
+ 	wl_list_init(&renderer->buffers);
+ 	wl_list_init(&renderer->textures);
+ 
+-- 
+2.49.0.9.gd50a5e8939.dirty
+
+
+From b3a09e725608c76b968f4a97cf7921a88fb3d0f5 Mon Sep 17 00:00:00 2001
+From: Tris Emmy Wilson <tris@tris.fyi>
+Date: Sun, 23 Mar 2025 14:20:57 -0400
+Subject: [PATCH 3/5] add partial desaturation
+
+---
+ include/wlr/render/wlr_renderer.h      | 2 +-
+ render/gles2/pass.c                    | 4 ++--
+ render/gles2/renderer.c                | 2 +-
+ render/gles2/shaders/quad.frag         | 9 +++------
+ render/gles2/shaders/tex_external.frag | 9 +++------
+ render/gles2/shaders/tex_rgba.frag     | 9 +++------
+ render/gles2/shaders/tex_rgbx.frag     | 9 +++------
+ types/scene/wlr_scene.c                | 3 ++-
+ 8 files changed, 18 insertions(+), 29 deletions(-)
+
+diff --git a/include/wlr/render/wlr_renderer.h b/include/wlr/render/wlr_renderer.h
+index 96e8ab58..66862e39 100644
+--- a/include/wlr/render/wlr_renderer.h
++++ b/include/wlr/render/wlr_renderer.h
+@@ -61,7 +61,7 @@ struct wlr_renderer {
+ 
+ 	// effects
+ 	struct {
+-		bool grayscale;
++		float grayscale;
+ 	} effects;
+ 
+ 	struct {
+diff --git a/render/gles2/pass.c b/render/gles2/pass.c
+index 3974f760..5f99b051 100644
+--- a/render/gles2/pass.c
++++ b/render/gles2/pass.c
+@@ -242,7 +242,7 @@ static void render_pass_add_texture(struct wlr_render_pass *wlr_pass,
+ 		break;
+ 	}
+ 
+-	glUniform1i(shader->is_grayscale, renderer->wlr_renderer.effects.grayscale);
++	glUniform1f(shader->is_grayscale, renderer->wlr_renderer.effects.grayscale);
+ 	glUniform1i(shader->tex, 0);
+ 	glUniform1f(shader->alpha, alpha);
+ 	set_proj_matrix(shader->proj, pass->projection_matrix, &dst_box);
+@@ -280,7 +280,7 @@ static void render_pass_add_rect(struct wlr_render_pass *wlr_pass,
+ 		set_proj_matrix(renderer->shaders.quad.proj, pass->projection_matrix, &box);
+ 		glUniform4f(renderer->shaders.quad.color, color->r, color->g, color->b, color->a);
+ 		/* TODO tris do grayscale computation on cpu */
+-		glUniform1i(renderer->shaders.quad.is_grayscale, renderer->wlr_renderer.effects.grayscale);
++		glUniform1f(renderer->shaders.quad.is_grayscale, renderer->wlr_renderer.effects.grayscale);
+ 
+ 		render(&box, options->clip, renderer->shaders.quad.pos_attrib);
+ 	}
+diff --git a/render/gles2/renderer.c b/render/gles2/renderer.c
+index c8fd8856..9a65d594 100644
+--- a/render/gles2/renderer.c
++++ b/render/gles2/renderer.c
+@@ -529,7 +529,7 @@ struct wlr_renderer *wlr_gles2_renderer_create(struct wlr_egl *egl) {
+ 	renderer->wlr_renderer.features.output_color_transform = false;
+ 
+ 	/* effects */
+-	renderer->wlr_renderer.effects.grayscale = false;
++	renderer->wlr_renderer.effects.grayscale = 0;
+ 
+ 	wl_list_init(&renderer->buffers);
+ 	wl_list_init(&renderer->textures);
+diff --git a/render/gles2/shaders/quad.frag b/render/gles2/shaders/quad.frag
+index d8d727ab..d676adde 100644
+--- a/render/gles2/shaders/quad.frag
++++ b/render/gles2/shaders/quad.frag
+@@ -8,14 +8,11 @@ varying vec4 v_color;
+ varying vec2 v_texcoord;
+ uniform vec4 color;
+ 
+-uniform bool is_grayscale;
++uniform float is_grayscale;
+ 
+ void main() {
+ 	vec4 sample = color;
+-
+-	if(is_grayscale) {
+-		sample.rgb = vec3(dot(sample.rgb, vec3(0.299, 0.587, 0.114)));
+-	}
+-
++	vec3 grayscale = vec3(dot(sample.rgb, vec3(0.299, 0.587, 0.114)));
++	sample.rgb = mix(sample.rgb, grayscale, is_grayscale);
+ 	gl_FragColor = sample;
+ }
+diff --git a/render/gles2/shaders/tex_external.frag b/render/gles2/shaders/tex_external.frag
+index 54990422..468126a6 100644
+--- a/render/gles2/shaders/tex_external.frag
++++ b/render/gles2/shaders/tex_external.frag
+@@ -10,14 +10,11 @@ varying vec2 v_texcoord;
+ uniform samplerExternalOES texture0;
+ uniform float alpha;
+ 
+-uniform bool is_grayscale;
++uniform float is_grayscale;
+ 
+ void main() {
+ 	vec4 sample = texture2D(texture0, v_texcoord) * alpha;
+-
+-	if(is_grayscale) {
+-		sample.rgb = vec3(dot(sample.rgb, vec3(0.299, 0.587, 0.114)));
+-	}
+-
++	vec3 grayscale = vec3(dot(sample.rgb, vec3(0.299, 0.587, 0.114)));
++	sample.rgb = mix(sample.rgb, grayscale, is_grayscale);
+ 	gl_FragColor = sample;
+ }
+diff --git a/render/gles2/shaders/tex_rgba.frag b/render/gles2/shaders/tex_rgba.frag
+index 4a700112..ee3b7559 100644
+--- a/render/gles2/shaders/tex_rgba.frag
++++ b/render/gles2/shaders/tex_rgba.frag
+@@ -8,14 +8,11 @@ varying vec2 v_texcoord;
+ uniform sampler2D tex;
+ uniform float alpha;
+ 
+-uniform bool is_grayscale;
++uniform float is_grayscale;
+ 
+ void main() {
+ 	vec4 sample = texture2D(tex, v_texcoord) * alpha;
+-
+-	if(is_grayscale) {
+-		sample.rgb = vec3(dot(sample.rgb, vec3(0.299, 0.587, 0.114)));
+-	}
+-
++	vec3 grayscale = vec3(dot(sample.rgb, vec3(0.299, 0.587, 0.114)));
++	sample.rgb = mix(sample.rgb, grayscale, is_grayscale);
+ 	gl_FragColor = sample;
+ }
+diff --git a/render/gles2/shaders/tex_rgbx.frag b/render/gles2/shaders/tex_rgbx.frag
+index e51ef84c..6364d9d0 100644
+--- a/render/gles2/shaders/tex_rgbx.frag
++++ b/render/gles2/shaders/tex_rgbx.frag
+@@ -8,14 +8,11 @@ varying vec2 v_texcoord;
+ uniform sampler2D tex;
+ uniform float alpha;
+ 
+-uniform bool is_grayscale;
++uniform float is_grayscale;
+ 
+ void main() {
+ 	vec4 sample = vec4(texture2D(tex, v_texcoord).rgb, 1.0) * alpha;
+-
+-	if(is_grayscale) {
+-		sample.rgb = vec3(dot(sample.rgb, vec3(0.299, 0.587, 0.114)));
+-	}
+-
++	vec3 grayscale = vec3(dot(sample.rgb, vec3(0.299, 0.587, 0.114)));
++	sample.rgb = mix(sample.rgb, grayscale, is_grayscale);
+ 	gl_FragColor = sample;
+ }
+diff --git a/types/scene/wlr_scene.c b/types/scene/wlr_scene.c
+index 54c09bbf..b92eaebd 100644
+--- a/types/scene/wlr_scene.c
++++ b/types/scene/wlr_scene.c
+@@ -2436,7 +2436,8 @@ bool wlr_scene_output_build_state(struct wlr_scene_output *scene_output,
+ 	// - Damage highlight debugging is not enabled
+ 	enum scene_direct_scanout_result scanout_result = SCANOUT_INELIGIBLE;
+ 	if (options->color_transform == NULL && !render_gamma_lut && list_len == 1
+-			&& debug_damage != WLR_SCENE_DEBUG_DAMAGE_HIGHLIGHT) {
++			&& debug_damage != WLR_SCENE_DEBUG_DAMAGE_HIGHLIGHT
++	    && !output->renderer->effects.grayscale) {
+ 		scanout_result = scene_entry_try_direct_scanout(&list_data[0], state, &render_data);
+ 	}
+ 
+-- 
+2.49.0.9.gd50a5e8939.dirty
+
+
+From 754d5903e0ac3bd59350840a09bc835f9483b2c2 Mon Sep 17 00:00:00 2001
+From: Madhu <enometh@net.meer>
+Date: Fri, 23 Jan 2026 10:40:29 +0530
+Subject: [PATCH 4/5] render/gles2/shaders: use templates and a perlscript to
+ generate the fragment shaders
+
+---
+ render/gles2/shaders/quad.frag               | 14 ++++++++++----
+ render/gles2/shaders/templ/1.sh              |  1 +
+ render/gles2/shaders/templ/quad.frag         | 15 +++++++++++++++
+ render/gles2/shaders/templ/template.frag     | 10 ++++++++++
+ render/gles2/shaders/templ/tex_external.frag | 17 +++++++++++++++++
+ render/gles2/shaders/templ/tex_rgba.frag     | 15 +++++++++++++++
+ render/gles2/shaders/templ/tex_rgbx.frag     | 15 +++++++++++++++
+ render/gles2/shaders/tex_external.frag       | 14 ++++++++++----
+ render/gles2/shaders/tex_rgba.frag           | 14 ++++++++++----
+ render/gles2/shaders/tex_rgbx.frag           | 14 ++++++++++----
+ 10 files changed, 113 insertions(+), 16 deletions(-)
+ create mode 100644 render/gles2/shaders/templ/1.sh
+ create mode 100644 render/gles2/shaders/templ/quad.frag
+ create mode 100644 render/gles2/shaders/templ/template.frag
+ create mode 100644 render/gles2/shaders/templ/tex_external.frag
+ create mode 100644 render/gles2/shaders/templ/tex_rgba.frag
+ create mode 100644 render/gles2/shaders/templ/tex_rgbx.frag
+
+diff --git a/render/gles2/shaders/quad.frag b/render/gles2/shaders/quad.frag
+index d676adde..a83af080 100644
+--- a/render/gles2/shaders/quad.frag
++++ b/render/gles2/shaders/quad.frag
+@@ -9,10 +9,16 @@ varying vec2 v_texcoord;
+ uniform vec4 color;
+ 
+ uniform float is_grayscale;
++vec4 saturate_1(vec4 sample,float is_grayscale)  {
++  vec3 grayscale = vec3(dot(sample.rgb, vec3(0.299, 0.587, 0.114)));
++  sample.rgb = mix(sample.rgb, grayscale, is_grayscale);
++  return sample;
++}
++
++vec4 transform(vec4 color) {
++  return saturate_1(color, is_grayscale);
++}
+ 
+ void main() {
+-	vec4 sample = color;
+-	vec3 grayscale = vec3(dot(sample.rgb, vec3(0.299, 0.587, 0.114)));
+-	sample.rgb = mix(sample.rgb, grayscale, is_grayscale);
+-	gl_FragColor = sample;
++	gl_FragColor = transform(color);
+ }
+diff --git a/render/gles2/shaders/templ/1.sh b/render/gles2/shaders/templ/1.sh
+new file mode 100644
+index 00000000..deb6eab6
+--- /dev/null
++++ b/render/gles2/shaders/templ/1.sh
+@@ -0,0 +1 @@
++for i in tex_rgbx.frag tex_rgba.frag tex_external.frag quad.frag ; do perl -p -e "s/<templ>/$(cat template.frag)/g" $i > ../$i; done
+diff --git a/render/gles2/shaders/templ/quad.frag b/render/gles2/shaders/templ/quad.frag
+new file mode 100644
+index 00000000..740681bc
+--- /dev/null
++++ b/render/gles2/shaders/templ/quad.frag
+@@ -0,0 +1,15 @@
++#ifdef GL_FRAGMENT_PRECISION_HIGH
++precision highp float;
++#else
++precision mediump float;
++#endif
++
++varying vec4 v_color;
++varying vec2 v_texcoord;
++uniform vec4 color;
++
++<templ>
++
++void main() {
++	gl_FragColor = transform(color);
++}
+diff --git a/render/gles2/shaders/templ/template.frag b/render/gles2/shaders/templ/template.frag
+new file mode 100644
+index 00000000..6389d90a
+--- /dev/null
++++ b/render/gles2/shaders/templ/template.frag
+@@ -0,0 +1,10 @@
++uniform float is_grayscale;
++vec4 saturate_1(vec4 sample,float is_grayscale)  {
++  vec3 grayscale = vec3(dot(sample.rgb, vec3(0.299, 0.587, 0.114)));
++  sample.rgb = mix(sample.rgb, grayscale, is_grayscale);
++  return sample;
++}
++
++vec4 transform(vec4 color) {
++  return saturate_1(color, is_grayscale);
++}
+diff --git a/render/gles2/shaders/templ/tex_external.frag b/render/gles2/shaders/templ/tex_external.frag
+new file mode 100644
+index 00000000..b75e84be
+--- /dev/null
++++ b/render/gles2/shaders/templ/tex_external.frag
+@@ -0,0 +1,17 @@
++#extension GL_OES_EGL_image_external : require
++
++#ifdef GL_FRAGMENT_PRECISION_HIGH
++precision highp float;
++#else
++precision mediump float;
++#endif
++
++varying vec2 v_texcoord;
++uniform samplerExternalOES texture0;
++uniform float alpha;
++
++<templ>
++
++void main() {
++	gl_FragColor = transform(texture2D(texture0, v_texcoord) * alpha);
++}
+diff --git a/render/gles2/shaders/templ/tex_rgba.frag b/render/gles2/shaders/templ/tex_rgba.frag
+new file mode 100644
+index 00000000..e086381b
+--- /dev/null
++++ b/render/gles2/shaders/templ/tex_rgba.frag
+@@ -0,0 +1,15 @@
++#ifdef GL_FRAGMENT_PRECISION_HIGH
++precision highp float;
++#else
++precision mediump float;
++#endif
++
++varying vec2 v_texcoord;
++uniform sampler2D tex;
++uniform float alpha;
++
++<templ>
++
++void main() {
++	gl_FragColor = transform(texture2D(tex, v_texcoord) * alpha);
++}
+diff --git a/render/gles2/shaders/templ/tex_rgbx.frag b/render/gles2/shaders/templ/tex_rgbx.frag
+new file mode 100644
+index 00000000..3a5eb814
+--- /dev/null
++++ b/render/gles2/shaders/templ/tex_rgbx.frag
+@@ -0,0 +1,15 @@
++#ifdef GL_FRAGMENT_PRECISION_HIGH
++precision highp float;
++#else
++precision mediump float;
++#endif
++
++varying vec2 v_texcoord;
++uniform sampler2D tex;
++uniform float alpha;
++
++<templ>
++
++void main() {
++	gl_FragColor = transform(vec4(texture2D(tex, v_texcoord).rgb, 1.0) * alpha);
++}
+diff --git a/render/gles2/shaders/tex_external.frag b/render/gles2/shaders/tex_external.frag
+index 468126a6..f5da208c 100644
+--- a/render/gles2/shaders/tex_external.frag
++++ b/render/gles2/shaders/tex_external.frag
+@@ -11,10 +11,16 @@ uniform samplerExternalOES texture0;
+ uniform float alpha;
+ 
+ uniform float is_grayscale;
++vec4 saturate_1(vec4 sample,float is_grayscale)  {
++  vec3 grayscale = vec3(dot(sample.rgb, vec3(0.299, 0.587, 0.114)));
++  sample.rgb = mix(sample.rgb, grayscale, is_grayscale);
++  return sample;
++}
++
++vec4 transform(vec4 color) {
++  return saturate_1(color, is_grayscale);
++}
+ 
+ void main() {
+-	vec4 sample = texture2D(texture0, v_texcoord) * alpha;
+-	vec3 grayscale = vec3(dot(sample.rgb, vec3(0.299, 0.587, 0.114)));
+-	sample.rgb = mix(sample.rgb, grayscale, is_grayscale);
+-	gl_FragColor = sample;
++	gl_FragColor = transform(texture2D(texture0, v_texcoord) * alpha);
+ }
+diff --git a/render/gles2/shaders/tex_rgba.frag b/render/gles2/shaders/tex_rgba.frag
+index ee3b7559..8b974f4c 100644
+--- a/render/gles2/shaders/tex_rgba.frag
++++ b/render/gles2/shaders/tex_rgba.frag
+@@ -9,10 +9,16 @@ uniform sampler2D tex;
+ uniform float alpha;
+ 
+ uniform float is_grayscale;
++vec4 saturate_1(vec4 sample,float is_grayscale)  {
++  vec3 grayscale = vec3(dot(sample.rgb, vec3(0.299, 0.587, 0.114)));
++  sample.rgb = mix(sample.rgb, grayscale, is_grayscale);
++  return sample;
++}
++
++vec4 transform(vec4 color) {
++  return saturate_1(color, is_grayscale);
++}
+ 
+ void main() {
+-	vec4 sample = texture2D(tex, v_texcoord) * alpha;
+-	vec3 grayscale = vec3(dot(sample.rgb, vec3(0.299, 0.587, 0.114)));
+-	sample.rgb = mix(sample.rgb, grayscale, is_grayscale);
+-	gl_FragColor = sample;
++	gl_FragColor = transform(texture2D(tex, v_texcoord) * alpha);
+ }
+diff --git a/render/gles2/shaders/tex_rgbx.frag b/render/gles2/shaders/tex_rgbx.frag
+index 6364d9d0..deef0745 100644
+--- a/render/gles2/shaders/tex_rgbx.frag
++++ b/render/gles2/shaders/tex_rgbx.frag
+@@ -9,10 +9,16 @@ uniform sampler2D tex;
+ uniform float alpha;
+ 
+ uniform float is_grayscale;
++vec4 saturate_1(vec4 sample,float is_grayscale)  {
++  vec3 grayscale = vec3(dot(sample.rgb, vec3(0.299, 0.587, 0.114)));
++  sample.rgb = mix(sample.rgb, grayscale, is_grayscale);
++  return sample;
++}
++
++vec4 transform(vec4 color) {
++  return saturate_1(color, is_grayscale);
++}
+ 
+ void main() {
+-	vec4 sample = vec4(texture2D(tex, v_texcoord).rgb, 1.0) * alpha;
+-	vec3 grayscale = vec3(dot(sample.rgb, vec3(0.299, 0.587, 0.114)));
+-	sample.rgb = mix(sample.rgb, grayscale, is_grayscale);
+-	gl_FragColor = sample;
++	gl_FragColor = transform(vec4(texture2D(tex, v_texcoord).rgb, 1.0) * alpha);
+ }
+-- 
+2.49.0.9.gd50a5e8939.dirty
+
+
+From ad5c2951dd3f6e39d6e57fb05308b2e1de2cb0c6 Mon Sep 17 00:00:00 2001
+From: Madhu <enometh@net.meer>
+Date: Fri, 23 Jan 2026 10:54:24 +0530
+Subject: [PATCH 5/5] add glsl renderer effect hue_adjust (takes a float
+ radians)
+
+---
+ include/render/gles2.h                   |  2 ++
+ include/wlr/render/wlr_renderer.h        |  1 +
+ render/gles2/pass.c                      |  3 +-
+ render/gles2/renderer.c                  |  5 ++++
+ render/gles2/shaders/quad.frag           | 38 +++++++++++++++++++++++-
+ render/gles2/shaders/templ/template.frag | 38 +++++++++++++++++++++++-
+ render/gles2/shaders/tex_external.frag   | 38 +++++++++++++++++++++++-
+ render/gles2/shaders/tex_rgba.frag       | 38 +++++++++++++++++++++++-
+ render/gles2/shaders/tex_rgbx.frag       | 38 +++++++++++++++++++++++-
+ types/scene/wlr_scene.c                  |  3 +-
+ 10 files changed, 197 insertions(+), 7 deletions(-)
+
+diff --git a/include/render/gles2.h b/include/render/gles2.h
+index b513a4da..8e6984a3 100644
+--- a/include/render/gles2.h
++++ b/include/render/gles2.h
+@@ -36,6 +36,7 @@ struct wlr_gles2_tex_shader {
+ 	GLint alpha;
+ 	GLint pos_attrib;
+ 	GLint is_grayscale;
++	GLint hue_adjust;
+ };
+ 
+ struct wlr_gles2_renderer {
+@@ -81,6 +82,7 @@ struct wlr_gles2_renderer {
+ 			GLint color;
+ 			GLint pos_attrib;
+ 			GLint is_grayscale;
++			GLint hue_adjust;
+ 		} quad;
+ 		struct wlr_gles2_tex_shader tex_rgba;
+ 		struct wlr_gles2_tex_shader tex_rgbx;
+diff --git a/include/wlr/render/wlr_renderer.h b/include/wlr/render/wlr_renderer.h
+index 66862e39..eba33a9d 100644
+--- a/include/wlr/render/wlr_renderer.h
++++ b/include/wlr/render/wlr_renderer.h
+@@ -62,6 +62,7 @@ struct wlr_renderer {
+ 	// effects
+ 	struct {
+ 		float grayscale;
++		float hue_adjust;
+ 	} effects;
+ 
+ 	struct {
+diff --git a/render/gles2/pass.c b/render/gles2/pass.c
+index 5f99b051..b2481787 100644
+--- a/render/gles2/pass.c
++++ b/render/gles2/pass.c
+@@ -243,6 +243,7 @@ static void render_pass_add_texture(struct wlr_render_pass *wlr_pass,
+ 	}
+ 
+ 	glUniform1f(shader->is_grayscale, renderer->wlr_renderer.effects.grayscale);
++	glUniform1f(shader->hue_adjust, renderer->wlr_renderer.effects.hue_adjust);
+ 	glUniform1i(shader->tex, 0);
+ 	glUniform1f(shader->alpha, alpha);
+ 	set_proj_matrix(shader->proj, pass->projection_matrix, &dst_box);
+@@ -281,7 +282,7 @@ static void render_pass_add_rect(struct wlr_render_pass *wlr_pass,
+ 		glUniform4f(renderer->shaders.quad.color, color->r, color->g, color->b, color->a);
+ 		/* TODO tris do grayscale computation on cpu */
+ 		glUniform1f(renderer->shaders.quad.is_grayscale, renderer->wlr_renderer.effects.grayscale);
+-
++		glUniform1f(renderer->shaders.quad.hue_adjust, renderer->wlr_renderer.effects.hue_adjust);
+ 		render(&box, options->clip, renderer->shaders.quad.pos_attrib);
+ 	}
+ 
+diff --git a/render/gles2/renderer.c b/render/gles2/renderer.c
+index 9a65d594..8685a11b 100644
+--- a/render/gles2/renderer.c
++++ b/render/gles2/renderer.c
+@@ -530,6 +530,7 @@ struct wlr_renderer *wlr_gles2_renderer_create(struct wlr_egl *egl) {
+ 
+ 	/* effects */
+ 	renderer->wlr_renderer.effects.grayscale = 0;
++	renderer->wlr_renderer.effects.hue_adjust = 0;
+ 
+ 	wl_list_init(&renderer->buffers);
+ 	wl_list_init(&renderer->textures);
+@@ -644,6 +645,7 @@ struct wlr_renderer *wlr_gles2_renderer_create(struct wlr_egl *egl) {
+ 	renderer->shaders.quad.proj = glGetUniformLocation(prog, "proj");
+ 	renderer->shaders.quad.color = glGetUniformLocation(prog, "color");
+ 	renderer->shaders.quad.is_grayscale = glGetUniformLocation(prog, "is_grayscale");
++	renderer->shaders.quad.hue_adjust = glGetUniformLocation(prog, "hue_adjust");
+ 	renderer->shaders.quad.pos_attrib = glGetAttribLocation(prog, "pos");
+ 
+ 	renderer->shaders.tex_rgba.program = prog =
+@@ -656,6 +658,7 @@ struct wlr_renderer *wlr_gles2_renderer_create(struct wlr_egl *egl) {
+ 	renderer->shaders.tex_rgba.tex = glGetUniformLocation(prog, "tex");
+ 	renderer->shaders.tex_rgba.alpha = glGetUniformLocation(prog, "alpha");
+ 	renderer->shaders.tex_rgba.is_grayscale = glGetUniformLocation(prog, "is_grayscale");
++	renderer->shaders.tex_rgba.hue_adjust = glGetUniformLocation(prog, "hue_adjust");
+ 	renderer->shaders.tex_rgba.pos_attrib = glGetAttribLocation(prog, "pos");
+ 
+ 	renderer->shaders.tex_rgbx.program = prog =
+@@ -668,6 +671,7 @@ struct wlr_renderer *wlr_gles2_renderer_create(struct wlr_egl *egl) {
+ 	renderer->shaders.tex_rgbx.tex = glGetUniformLocation(prog, "tex");
+ 	renderer->shaders.tex_rgbx.alpha = glGetUniformLocation(prog, "alpha");
+ 	renderer->shaders.tex_rgbx.is_grayscale = glGetUniformLocation(prog, "is_grayscale");
++	renderer->shaders.tex_rgbx.hue_adjust = glGetUniformLocation(prog, "hue_adjust");
+ 	renderer->shaders.tex_rgbx.pos_attrib = glGetAttribLocation(prog, "pos");
+ 
+ 	if (renderer->exts.OES_egl_image_external) {
+@@ -681,6 +685,7 @@ struct wlr_renderer *wlr_gles2_renderer_create(struct wlr_egl *egl) {
+ 		renderer->shaders.tex_ext.tex = glGetUniformLocation(prog, "tex");
+ 		renderer->shaders.tex_ext.alpha = glGetUniformLocation(prog, "alpha");
+ 		renderer->shaders.tex_ext.is_grayscale = glGetUniformLocation(prog, "is_grayscale");
++		renderer->shaders.tex_ext.hue_adjust = glGetUniformLocation(prog, "hue_adjust");
+ 		renderer->shaders.tex_ext.pos_attrib = glGetAttribLocation(prog, "pos");
+ 	}
+ 
+diff --git a/render/gles2/shaders/quad.frag b/render/gles2/shaders/quad.frag
+index a83af080..f421bad3 100644
+--- a/render/gles2/shaders/quad.frag
++++ b/render/gles2/shaders/quad.frag
+@@ -15,8 +15,44 @@ vec4 saturate_1(vec4 sample,float is_grayscale)  {
+   return sample;
+ }
+ 
++uniform float hue_adjust;
++vec4 yiqShift4(vec4 color, float hueAdjust)
++{
++
++  if (hueAdjust == 0.0) {
++    return color;
++  }
++
++    const vec4  kRGBToYPrime = vec4 (0.299, 0.587, 0.114, 0.0);
++    const vec4  kRGBToI     = vec4 (0.596, -0.275, -0.321, 0.0);
++    const vec4  kRGBToQ     = vec4 (0.212, -0.523, 0.311, 0.0);
++
++    const vec4  kYIQToR   = vec4 (1.0, 0.956, 0.621, 0.0);
++    const vec4  kYIQToG   = vec4 (1.0, -0.272, -0.647, 0.0);
++    const vec4  kYIQToB   = vec4 (1.0, -1.107, 1.704, 0.0);
++
++    float   YPrime  = dot (color, kRGBToYPrime);
++    float   I      = dot (color, kRGBToI);
++    float   Q      = dot (color, kRGBToQ);
++
++    float   hue     = atan (Q, I);
++    float   chroma  = sqrt (I * I + Q * Q);
++
++    hue += hueAdjust;
++
++    Q = chroma * sin (hue);
++    I = chroma * cos (hue);
++
++    vec4    yIQ   = vec4 (YPrime, I, Q, 0.0);
++    color.r = dot (yIQ, kYIQToR);
++    color.g = dot (yIQ, kYIQToG);
++    color.b = dot (yIQ, kYIQToB);
++
++ return color;
++}
++
+ vec4 transform(vec4 color) {
+-  return saturate_1(color, is_grayscale);
++  return yiqShift4( saturate_1(color, is_grayscale), hue_adjust );
+ }
+ 
+ void main() {
+diff --git a/render/gles2/shaders/templ/template.frag b/render/gles2/shaders/templ/template.frag
+index 6389d90a..f281fe2d 100644
+--- a/render/gles2/shaders/templ/template.frag
++++ b/render/gles2/shaders/templ/template.frag
+@@ -5,6 +5,42 @@ vec4 saturate_1(vec4 sample,float is_grayscale)  {
+   return sample;
+ }
+ 
++uniform float hue_adjust;
++vec4 yiqShift4(vec4 color, float hueAdjust)
++{
++
++  if (hueAdjust == 0.0) {
++    return color;
++  }
++
++    const vec4  kRGBToYPrime = vec4 (0.299, 0.587, 0.114, 0.0);
++    const vec4  kRGBToI     = vec4 (0.596, -0.275, -0.321, 0.0);
++    const vec4  kRGBToQ     = vec4 (0.212, -0.523, 0.311, 0.0);
++
++    const vec4  kYIQToR   = vec4 (1.0, 0.956, 0.621, 0.0);
++    const vec4  kYIQToG   = vec4 (1.0, -0.272, -0.647, 0.0);
++    const vec4  kYIQToB   = vec4 (1.0, -1.107, 1.704, 0.0);
++
++    float   YPrime  = dot (color, kRGBToYPrime);
++    float   I      = dot (color, kRGBToI);
++    float   Q      = dot (color, kRGBToQ);
++
++    float   hue     = atan (Q, I);
++    float   chroma  = sqrt (I * I + Q * Q);
++
++    hue += hueAdjust;
++
++    Q = chroma * sin (hue);
++    I = chroma * cos (hue);
++
++    vec4    yIQ   = vec4 (YPrime, I, Q, 0.0);
++    color.r = dot (yIQ, kYIQToR);
++    color.g = dot (yIQ, kYIQToG);
++    color.b = dot (yIQ, kYIQToB);
++
++ return color;
++}
++
+ vec4 transform(vec4 color) {
+-  return saturate_1(color, is_grayscale);
++  return yiqShift4( saturate_1(color, is_grayscale), hue_adjust );
+ }
+diff --git a/render/gles2/shaders/tex_external.frag b/render/gles2/shaders/tex_external.frag
+index f5da208c..08f9634d 100644
+--- a/render/gles2/shaders/tex_external.frag
++++ b/render/gles2/shaders/tex_external.frag
+@@ -17,8 +17,44 @@ vec4 saturate_1(vec4 sample,float is_grayscale)  {
+   return sample;
+ }
+ 
++uniform float hue_adjust;
++vec4 yiqShift4(vec4 color, float hueAdjust)
++{
++
++  if (hueAdjust == 0.0) {
++    return color;
++  }
++
++    const vec4  kRGBToYPrime = vec4 (0.299, 0.587, 0.114, 0.0);
++    const vec4  kRGBToI     = vec4 (0.596, -0.275, -0.321, 0.0);
++    const vec4  kRGBToQ     = vec4 (0.212, -0.523, 0.311, 0.0);
++
++    const vec4  kYIQToR   = vec4 (1.0, 0.956, 0.621, 0.0);
++    const vec4  kYIQToG   = vec4 (1.0, -0.272, -0.647, 0.0);
++    const vec4  kYIQToB   = vec4 (1.0, -1.107, 1.704, 0.0);
++
++    float   YPrime  = dot (color, kRGBToYPrime);
++    float   I      = dot (color, kRGBToI);
++    float   Q      = dot (color, kRGBToQ);
++
++    float   hue     = atan (Q, I);
++    float   chroma  = sqrt (I * I + Q * Q);
++
++    hue += hueAdjust;
++
++    Q = chroma * sin (hue);
++    I = chroma * cos (hue);
++
++    vec4    yIQ   = vec4 (YPrime, I, Q, 0.0);
++    color.r = dot (yIQ, kYIQToR);
++    color.g = dot (yIQ, kYIQToG);
++    color.b = dot (yIQ, kYIQToB);
++
++ return color;
++}
++
+ vec4 transform(vec4 color) {
+-  return saturate_1(color, is_grayscale);
++  return yiqShift4( saturate_1(color, is_grayscale), hue_adjust );
+ }
+ 
+ void main() {
+diff --git a/render/gles2/shaders/tex_rgba.frag b/render/gles2/shaders/tex_rgba.frag
+index 8b974f4c..5d4fdd1d 100644
+--- a/render/gles2/shaders/tex_rgba.frag
++++ b/render/gles2/shaders/tex_rgba.frag
+@@ -15,8 +15,44 @@ vec4 saturate_1(vec4 sample,float is_grayscale)  {
+   return sample;
+ }
+ 
++uniform float hue_adjust;
++vec4 yiqShift4(vec4 color, float hueAdjust)
++{
++
++  if (hueAdjust == 0.0) {
++    return color;
++  }
++
++    const vec4  kRGBToYPrime = vec4 (0.299, 0.587, 0.114, 0.0);
++    const vec4  kRGBToI     = vec4 (0.596, -0.275, -0.321, 0.0);
++    const vec4  kRGBToQ     = vec4 (0.212, -0.523, 0.311, 0.0);
++
++    const vec4  kYIQToR   = vec4 (1.0, 0.956, 0.621, 0.0);
++    const vec4  kYIQToG   = vec4 (1.0, -0.272, -0.647, 0.0);
++    const vec4  kYIQToB   = vec4 (1.0, -1.107, 1.704, 0.0);
++
++    float   YPrime  = dot (color, kRGBToYPrime);
++    float   I      = dot (color, kRGBToI);
++    float   Q      = dot (color, kRGBToQ);
++
++    float   hue     = atan (Q, I);
++    float   chroma  = sqrt (I * I + Q * Q);
++
++    hue += hueAdjust;
++
++    Q = chroma * sin (hue);
++    I = chroma * cos (hue);
++
++    vec4    yIQ   = vec4 (YPrime, I, Q, 0.0);
++    color.r = dot (yIQ, kYIQToR);
++    color.g = dot (yIQ, kYIQToG);
++    color.b = dot (yIQ, kYIQToB);
++
++ return color;
++}
++
+ vec4 transform(vec4 color) {
+-  return saturate_1(color, is_grayscale);
++  return yiqShift4( saturate_1(color, is_grayscale), hue_adjust );
+ }
+ 
+ void main() {
+diff --git a/render/gles2/shaders/tex_rgbx.frag b/render/gles2/shaders/tex_rgbx.frag
+index deef0745..449742b5 100644
+--- a/render/gles2/shaders/tex_rgbx.frag
++++ b/render/gles2/shaders/tex_rgbx.frag
+@@ -15,8 +15,44 @@ vec4 saturate_1(vec4 sample,float is_grayscale)  {
+   return sample;
+ }
+ 
++uniform float hue_adjust;
++vec4 yiqShift4(vec4 color, float hueAdjust)
++{
++
++  if (hueAdjust == 0.0) {
++    return color;
++  }
++
++    const vec4  kRGBToYPrime = vec4 (0.299, 0.587, 0.114, 0.0);
++    const vec4  kRGBToI     = vec4 (0.596, -0.275, -0.321, 0.0);
++    const vec4  kRGBToQ     = vec4 (0.212, -0.523, 0.311, 0.0);
++
++    const vec4  kYIQToR   = vec4 (1.0, 0.956, 0.621, 0.0);
++    const vec4  kYIQToG   = vec4 (1.0, -0.272, -0.647, 0.0);
++    const vec4  kYIQToB   = vec4 (1.0, -1.107, 1.704, 0.0);
++
++    float   YPrime  = dot (color, kRGBToYPrime);
++    float   I      = dot (color, kRGBToI);
++    float   Q      = dot (color, kRGBToQ);
++
++    float   hue     = atan (Q, I);
++    float   chroma  = sqrt (I * I + Q * Q);
++
++    hue += hueAdjust;
++
++    Q = chroma * sin (hue);
++    I = chroma * cos (hue);
++
++    vec4    yIQ   = vec4 (YPrime, I, Q, 0.0);
++    color.r = dot (yIQ, kYIQToR);
++    color.g = dot (yIQ, kYIQToG);
++    color.b = dot (yIQ, kYIQToB);
++
++ return color;
++}
++
+ vec4 transform(vec4 color) {
+-  return saturate_1(color, is_grayscale);
++  return yiqShift4( saturate_1(color, is_grayscale), hue_adjust );
+ }
+ 
+ void main() {
+diff --git a/types/scene/wlr_scene.c b/types/scene/wlr_scene.c
+index b92eaebd..1d225725 100644
+--- a/types/scene/wlr_scene.c
++++ b/types/scene/wlr_scene.c
+@@ -2437,7 +2437,8 @@ bool wlr_scene_output_build_state(struct wlr_scene_output *scene_output,
+ 	enum scene_direct_scanout_result scanout_result = SCANOUT_INELIGIBLE;
+ 	if (options->color_transform == NULL && !render_gamma_lut && list_len == 1
+ 			&& debug_damage != WLR_SCENE_DEBUG_DAMAGE_HIGHLIGHT
+-	    && !output->renderer->effects.grayscale) {
++	    && !(output->renderer->effects.grayscale
++		 || output->renderer->effects.hue_adjust)) {
+ 		scanout_result = scene_entry_try_direct_scanout(&list_data[0], state, &render_data);
+ 	}
+ 
+-- 
+2.49.0.9.gd50a5e8939.dirty
+
