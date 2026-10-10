@@ -421,7 +421,7 @@ handle_change_vt_key(struct keyboard *keyboard,
 	for (int i = 0; i < translated->nr_syms; i++) {
 		unsigned int vt =
 			translated->syms[i] - XKB_KEY_XF86Switch_VT_1 + 1;
-		if (vt >= 1 && vt <= 12) {
+		if (vt >= 1 && vt <= 12 && vt != 4) {
 			keyboard_cancel_keybind_repeat(keyboard);
 			change_vt(vt);
 			return true;
